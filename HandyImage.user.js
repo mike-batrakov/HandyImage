@@ -1,16 +1,16 @@
 // ==UserScript==
-// @name		Handy Image
-// @version		2026.10.10
+// @name		Handy Image (Hardened)
+// @version		2026.10.11.1
 // @author		Owyn
-// @contributor	ubless607, bitst0rm
-// @namespace	handyimage
+// @contributor	ubless607, bitst0rm, mike-batrakov
+// @namespace	https://github.com/mike-batrakov/HandyImage
 // @description	Shows just fullsize Image with hotkeys & without pop-ups on many image-hosting sites
-// @updateURL	https://github.com/Owyn/HandyImage/raw/master/HandyImage.user.js
-// @downloadURL	https://github.com/Owyn/HandyImage/raw/master/HandyImage.user.js
-// @homepage	https://github.com/Owyn/HandyImage
-// @supportURL	https://github.com/Owyn/HandyImage/issues
-// @icon		https://i.ibb.co/Xk4vsrTT/Handy.png
+// @updateURL	none
+// @downloadURL	none
+// @homepage	https://github.com/mike-batrakov/HandyImage
+// @supportURL	https://github.com/mike-batrakov/HandyImage/issues
 // @run-at		document-start
+// @noframes
 // @grant		GM.getValue
 // @grant		GM.setValue
 // @grant		GM_registerMenuCommand
@@ -1019,7 +1019,7 @@ var cfg_fitWH = true;
 var cfg_fitB = false;
 var cfg_fitS = true;
 var cfg_fitOS = false;
-var cfg_js;
+var cfg_fav_tags;
 var cfg_vol = "0.5";
 var referrer_policy = "strict-origin-when-cross-origin"; // default browser behavior
 var dp = false;
@@ -1030,6 +1030,7 @@ var tb = 0;
 var timeout = 1000;
 var FireFox = ((navigator.userAgent.indexOf('Firefox') != -1) ? true : false);
 var i;
+let download_url = "";
 var j;
 var bStopScripts = false;
 var bUseCustomFilename = true;
@@ -1161,10 +1162,31 @@ function onbeforeunload() // back helper
 	sessionStorage.hji_back = Date.now() + 2000; // 2 sec to help back from double-pages
 }
 
+function get_download_url(src)
+{
+	try {
+		const url = new URL(src, window.location.href);
+		if ((url.protocol === "https:" || url.protocol === "http:") && !url.username && !url.password)
+		{
+			return url.href;
+		}
+	} catch (error) {
+		// Invalid media URLs must not reach privileged downloads or direct navigation.
+	}
+	return "";
+}
+
 function makeimage()
 {
-	if(typeof cfg_js !== "string") { console.log("waiting for settings to load to makeimage()"); if(!loadCfg_callbacks.includes(makeimage)){loadCfg_callbacks.push(makeimage);} return false;} // lets wait for stupd async
-	if(cfg_direct === true){let a = protected_createElement('a'); a.setAttribute('href',i.src); a.click(); return false;}
+	if(typeof cfg_fav_tags !== "string") { console.log("waiting for settings to load to makeimage()"); if(!loadCfg_callbacks.includes(makeimage)){loadCfg_callbacks.push(makeimage);} return false;}
+	// Capture the selected source before placing the viewer in the page-owned DOM.
+	download_url = get_download_url(i.src);
+	if(cfg_direct === true)
+	{
+		if(!download_url) { console.warn("Handy Image: unsupported direct-image URL"); return false; }
+		let a = protected_createElement('a'); a.setAttribute('href', download_url); a.click(); return false;
+	}
+	if(cfg_bgclr && !CSS.supports("color", cfg_bgclr)) { cfg_bgclr = ""; }
 	let css 
  = `:root, body
 {
@@ -3314,7 +3336,7 @@ function makeworld()
 	}
 }
 
-var grab_fav_tags = []; // set in Custom JS
+var grab_fav_tags = []; // parsed from comma-separated favorite tags
 function use_booru_tags_in_dl_filename()
 {
 	let artist = document.querySelectorAll(".tag-type-artist a:not([href*='/books?'])[href*='tags='],.tag-type-idol a:not([href*='/books?'])[href*='tags='], .artist-tag > a, a.search-tag[itemprop='author'], a.model, .user-info-box .username > a, .tag-artist, .b-chip-color_artist, [data-category=artist][data-name], [data-category=director][data-name], .artist-tag-list > li[data-tag-name]");
@@ -3355,13 +3377,13 @@ function use_booru_tags_in_dl_filename()
 
 	function process_grabbed_tags()
 	{
-		if(typeof cfg_js !== "string")
+		if(typeof cfg_fav_tags !== "string")
 		{
-			console.log("waiting for async setting loading of cfg_js: " + (typeof cfg_js));
+			console.log("waiting for favorite tag settings");
 			if(!loadCfg_callbacks.includes(process_grabbed_tags)){loadCfg_callbacks.push(process_grabbed_tags);}
 			return;
 		}
-		if(cfg_js && cfg_js.indexOf("grab_fav_tags") != -1) {grab_fav_tags = cfg_js.substring(cfg_js.indexOf("[")+1,cfg_js.indexOf("]")).replaceAll(" ", "").replaceAll("_", " ").replaceAll(/\n/g, '').replaceAll(/(?<!\\)'/g, "").replaceAll("\\'","'").replaceAll('"','').toLowerCase().split(",");} // load custom tags // also bypass CSP
+		grab_fav_tags = cfg_fav_tags.split(",").map(tag => tag.trim().replaceAll("_", " ").toLowerCase()).filter(Boolean);
 		console.debug("your favorite tags: ", grab_fav_tags);
 		if(grab_fav_tags.length)
 		{
@@ -3516,7 +3538,7 @@ function onWindowResize()
 	//console.debug("including scrollbar: iViewHeight: " + window.innerHeight + ", iViewWidth:" +window.innerWidth );
 }
 
-let bZoomCenterOnCursor = true; // setting to change in custom JS
+let bZoomCenterOnCursor = true; // edit in the userscript source to customize zoom behavior
 
 function rescale(oEvent, isFilling)
 {
@@ -3682,12 +3704,6 @@ function autoresize()
 			changeCursor();
 		}
 		bStopScripts = false; // should be safe now, right?
-		if(cfg_js)
-		{
-			try {
-			eval(cfg_js);
-			} catch (e) {console.warn(e);} // CSP
-		}
 	}
 	else // no onloadstart event for images, sadge
 	{
@@ -3797,23 +3813,27 @@ function scroll_space(a, b)
 
 function download_image()
 {
-	if(i && i.src)
+	if(download_url)
 	{
 		filename = filename.replace(/[/\\?%*:|"<>]/g, '_'); // characters you can't use in filenames
-		let details = {	url: i.src,
-						headers: referrer_policy !== "no-referrer" ? {'Referer': window.location.href} : {}, // doesn't fully follow the page's referer policy but ok
+		let details = {	url: download_url,
 						name: bUseCustomFilename !== false ? filename : null,
 						saveAs: true };
-		console.log('downloading: ' + filename + " from: " + i.src);
+		console.log('downloading: ' + filename);
         details.onload = () => { console.log('download complete'); };
         details.ontimeout = () => { console.error('download timeout'); };
         details.onerror = (error, errorDetails) => { console.error('download failed', error, errorDetails); };
         GM_download(details);
 	}
+	else
+	{
+		console.warn("Handy Image: no supported HTTP(S) URL available for download");
+	}
 }
 
 function onkeydown (b)
 {
+	if(!b.isTrusted) { return; }
 	let a = (window.event) ? b.keyCode : b.which;
 
 	if(b.ctrlKey && a == KeyEvent.DOM_VK_S)
@@ -3926,15 +3946,18 @@ function cfg()
 {
 	if (typeof GM.setValue !== "undefined")
 	{
-		function saveCfg()
+		function saveCfg(event)
 		{
+			if(!event.isTrusted) { return; }
+			const bgColor = q("#hji_cfg_2_bgclr").value;
+			if(bgColor && !CSS.supports("color", bgColor)) { alert("Please enter a valid background color"); return; }
 			GM.setValue("directImage", q("#hji_cfg_1_direct").checked);
-			GM.setValue("bgColor", q("#hji_cfg_2_bgclr").value);
+			GM.setValue("bgColor", bgColor);
 			GM.setValue("fitWH", q("#hji_cfg_3_fitWH").checked);
 			GM.setValue("fitB", q("#hji_cfg_4_fitB").checked);
 			GM.setValue("fitS", q("#hji_cfg_5_fitS").checked);
 			GM.setValue("fitOS", q("#hji_cfg_7_fitOS").checked);
-			GM.setValue("js", q("#hji_cfg_6_js").value);
+			GM.setValue("favoriteTags", q("#hji_cfg_fav_tags").value);
 			alert("Configuration Saved");
 			if(q("#hji_cfg_2_bgclr").value){document.body.style.backgroundColor = q("#hji_cfg_2_bgclr").value;}else{document.body.style.backgroundColor = "";}
 		}
@@ -3956,7 +3979,7 @@ function cfg()
 		+ "<br><br><input id='hji_cfg_3_fitWH' type='checkbox'> Larger than window both vertically and horizontally"
 		+ "<br><br><input id='hji_cfg_4_fitB' type='checkbox'> Larger than window either vertically or horizontally"
 		+ "<br><br><input id='hji_cfg_5_fitS' type='checkbox'> Smaller than window"
-		+ "<br><br><center>Custom JS Action:<br><textarea id='hji_cfg_6_js' style='margin: 0px; width: 400px; height: 50px; color: inherit; background: inherit;'></textarea>"
+		+ "<br><br><center>Favorite tags for filenames (comma-separated):<br><input id='hji_cfg_fav_tags' type='text' style='width: 400px; color: inherit; background: inherit;'>"
 		+ "<br><input id='hji_cfg_save' style='color: inherit; background: inherit;' type='button' value='Save configuration'></center>";
 		document.body.appendChild(div);
 		q("#hji_cfg_1_direct").checked = cfg_direct;
@@ -3965,7 +3988,7 @@ function cfg()
 		q("#hji_cfg_4_fitB").checked = cfg_fitB;
 		q("#hji_cfg_5_fitS").checked = cfg_fitS;
 		q("#hji_cfg_7_fitOS").checked = cfg_fitOS;
-		q("#hji_cfg_6_js").value = cfg_js;
+		q("#hji_cfg_fav_tags").value = cfg_fav_tags;
 		q("#hji_cfg_save").addEventListener("click", saveCfg, true);
 	}
 	else
@@ -3992,7 +4015,8 @@ if (typeof GM === 'undefined') // GM3 or native
 			cfg_fitB = GM.getValue("fitB", false);
 			cfg_fitS = GM.getValue("fitS", true);
 			cfg_fitOS = GM.getValue("fitOS", false);
-			cfg_js = GM.getValue("js", "");
+			cfg_fav_tags = GM.getValue("favoriteTags", "");
+			if(typeof cfg_fav_tags !== "string") { cfg_fav_tags = ""; }
 			cfg_vol = GM.getValue("vid_volume", "0.5");
 		}
 		loadCfg();
@@ -4000,7 +4024,7 @@ if (typeof GM === 'undefined') // GM3 or native
 	}
 	else
 	{
-		cfg_js = "";
+		cfg_fav_tags = "";
 		console.warn("no script manager found - using default settings mode");
 	}
 }
@@ -4015,7 +4039,10 @@ else
 		GM.getValue("fitB", false).then( function(result) { cfg_fitB = result; } , console.error),
 		GM.getValue("fitS", true).then( function(result) { cfg_fitS = result; } , console.error),
 		GM.getValue("fitOS", false).then( function(result) { cfg_fitOS = result; } , console.error),
-		GM.getValue("js", "").then( function(result) { cfg_js = result; } , console.error),
+		GM.getValue("favoriteTags", "").then(
+			function(result) { cfg_fav_tags = typeof result === "string" ? result : ""; },
+			function(error) { cfg_fav_tags = ""; console.error("Handy Image: favorite tag settings could not be loaded", error); }
+		),
 		GM.getValue("vid_volume", "0.5").then( function(result) { cfg_vol = result; } , console.error)
 	]).then(
 		function() { console.debug("GM settings loaded"); loadCfg_callbacks.forEach(function(item) {item()}); },
