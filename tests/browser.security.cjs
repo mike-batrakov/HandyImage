@@ -35,7 +35,7 @@ function initScript(settings) {
   })();`;
 }
 
-async function fixturePage(browser, { url, html, settings = {} }) {
+async function fixturePage(browser, { url, html, settings = {}, lateInjection = false }) {
   const context = await browser.newContext({ viewport: null });
   await context.route('**/*', route => {
     const requestUrl = route.request().url();
@@ -43,19 +43,32 @@ async function fixturePage(browser, { url, html, settings = {} }) {
     if (requestUrl.startsWith('https://media.fixture.test/')) return route.fulfill({ contentType: 'image/svg+xml', body: pixel });
     return route.abort();
   });
-  await context.addInitScript({ content: initScript(settings) });
+  if (!lateInjection) await context.addInitScript({ content: initScript(settings) });
   const page = await context.newPage();
   const errors = [];
   const messages = [];
   page.on('pageerror', error => errors.push(error.message));
   page.on('console', message => { messages.push(message.text()); if (process.env.HANDYIMAGE_TEST_DEBUG) console.log(message.text()); });
-  await page.goto(url, { waitUntil: 'domcontentloaded' });
+  await page.goto(url, { waitUntil: lateInjection ? 'load' : 'domcontentloaded' });
+  if (lateInjection) await page.evaluate(initScript(settings));
   return { context, page, errors, messages };
 }
 
 async function main() {
   const browser = await firefox.launch({ headless: true, ...(process.env.HANDYIMAGE_FIREFOX_EXECUTABLE ? { executablePath: process.env.HANDYIMAGE_FIREFOX_EXECUTABLE } : {}) });
   try {
+    const lateViewer = await fixturePage(browser, {
+      url: 'https://imgbox.com/view/late-startup',
+      html: '<!doctype html><title>Stable loaded page</title><img id="img" src="https://media.fixture.test/original.png"><p id="host-content">Host content</p>',
+      lateInjection: true,
+    });
+    try {
+      await lateViewer.page.waitForFunction(() => document.title.includes('(1x1)'), null, { timeout: 3000 });
+      assert.equal(await lateViewer.page.locator('#host-content').count(), 0);
+      assert.deepEqual(lateViewer.errors, []);
+      console.log('PASS Firefox late startup: stable loaded page renders without another script or DOM mutation');
+    } finally { await lateViewer.context.close(); }
+
     const viewer = await fixturePage(browser, {
       url: 'https://imgbox.com/view/fixture?private=secret',
       html: '<!doctype html><title>Fixture</title><img id="img" src="https://media.fixture.test/original.png"><p>Host content</p>',

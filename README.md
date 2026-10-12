@@ -27,6 +27,8 @@ The host-specific viewer remains based on upstream. These fixes address the revi
 
 Run `node --test tests/security.test.cjs` for dependency-free security regressions. The Firefox integration fixture requires Playwright and its Firefox browser: run `node tests/browser.security.cjs`. Optional `HANDYIMAGE_PLAYWRIGHT_PATH` and `HANDYIMAGE_FIREFOX_EXECUTABLE` variables select an existing installation. Fixtures route all page/media requests locally in an isolated browser context and mock GM APIs; they do not reproduce the installed Tampermonkey extension's sandbox, update loader, or native download subsystem.
 
+Version `2026.10.11.2` also scans an already-loaded page at startup. Previously, image detection depended on a later DOM mutation, so late Tampermonkey injection could leave the viewer idle until another script changed the page. The regression fixture checks startup on a stable, fully loaded page without extra mutations.
+
 ## Upstream features
 
 <h3>Features</h3>

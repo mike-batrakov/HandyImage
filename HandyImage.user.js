@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name		Handy Image (Hardened)
-// @version		2026.10.11.1
+// @version		2026.10.11.2
 // @author		Owyn
 // @contributor	ubless607, bitst0rm, mike-batrakov
 // @namespace	https://github.com/mike-batrakov/HandyImage
@@ -4051,4 +4051,15 @@ else
 	}
 	console.debug("GM settings started loading")
 	loadCfg();
+}
+
+// Late injection can miss every DOM mutation. Scan the existing page once,
+// after initialization, and retain the observer for content added later.
+if(document.readyState === "loading")
+{
+	protected_addEventListener(document, "DOMContentLoaded", makeworld, {once: true});
+}
+else
+{
+	makeworld();
 }
